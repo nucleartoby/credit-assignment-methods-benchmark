@@ -1,4 +1,4 @@
-# Project name
+# Credit Assignment Methods Benchmark
 
 One or two sentences on what this project is about.
 
