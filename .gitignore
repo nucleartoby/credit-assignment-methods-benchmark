@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Environment and secrets
+.env
+.env.*
+
+# Outputs: keep them out of git
+outputs/
+runs/
+wandb/
+checkpoints/
+*.ckpt
+*.pt
+
+# OS
+.DS_Store
