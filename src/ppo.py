@@ -67,6 +67,8 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
 
     vec = make_vec(cfg.env_id, cfg.num_envs, cfg.seed, **cfg.env_kwargs)
     has_oracle = hasattr(vec, "oracle")
+    if has_oracle and cfg.gamma != 1.0:
+        raise ValueError(f"{cfg.env_id}'s oracle is undiscounted, so credit is only scored with gamma = 1 (got {cfg.gamma})")
     agent = ActorCritic(vec.observation_space, vec.action_space, cfg.hidden_size).to(device)
     optimizer = torch.optim.Adam(agent.parameters(), lr=cfg.learning_rate, eps=1e-5)
 
