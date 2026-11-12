@@ -2,12 +2,17 @@ import argparse
 import itertools
 import json
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import fields
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 
 from .ppo import PPOConfig, train
+
+HEADLINE = ("p_decisive", "avg_p_decisive", "solved_at", "avg_credit_corr", "avg_credit_slope", "avg_spurious_frac",
+            "avg_spurious_rms", "mean_return")
 
 
 def _slug(value) -> str:
@@ -22,17 +27,22 @@ def _run(kwargs: dict) -> str:
     return kwargs["run_name"]
 
 
-def sweep(spec_path: str, workers: int) -> None:
-    spec = json.loads(Path(spec_path).read_text())
+def sweep(spec: dict, workers: int, only: str = "") -> None:
     out_dir = Path(spec["out_dir"])
+    config_fields = {f.name for f in fields(PPOConfig)}
     jobs, finished = [], 0
     for values in itertools.product(*spec["grid"].values()):
         combo = dict(zip(spec["grid"], values))
         name = "__".join(f"{k}-{_slug(v)}" for k, v in combo.items())
+        if only not in name:
+            continue
         if (out_dir / name / "final.json").exists():
             finished += 1
             continue
-        jobs.append({**spec["base"], **combo, "out_dir": str(out_dir), "run_name": name, "log_interval": 0})
+        kwargs = dict(spec["base"])
+        for key, value in combo.items():
+            kwargs.update({key: value} if key in config_fields else value)
+        jobs.append({**kwargs, "out_dir": str(out_dir), "run_name": name, "log_interval": 0})
 
     print(f"{len(jobs)} runs to do, {finished} already finished")
     with ProcessPoolExecutor(workers) as pool:
@@ -41,7 +51,7 @@ def sweep(spec_path: str, workers: int) -> None:
             print(f"[{n}/{len(jobs)}] {future.result()}", flush=True)
 
 
-def summarize(out_dir: str) -> pd.DataFrame:
+def summarize(out_dir: str) -> tuple[pd.DataFrame, list[str]]:
     rows, config_cols = [], set()
     for final in sorted(Path(out_dir).glob("*/final.json")):
         config = json.loads((final.parent / "config.json").read_text())
@@ -52,10 +62,11 @@ def summarize(out_dir: str) -> pd.DataFrame:
         raise SystemExit(f"No finished runs in {out_dir}")
     df = pd.DataFrame(rows)
 
-    settings = [c for c in df.columns if c in config_cols and c not in ("method", "seed", "run_name")]
+    variant = "label" if df["label"].astype(bool).all() else "method"
+    settings = [c for c in df.columns if c in config_cols and c not in (variant, "seed", "run_name")]
     df[settings] = df[settings].astype(object).where(df[settings].notna(), "default")
-    group_cols = ["method"] + [c for c in settings if df[c].nunique() > 1]
-    metric_cols = [c for c in df.columns if c.startswith("info_")] + ["mean_return"]
+    group_cols = [variant] + [c for c in settings if df.groupby(variant)[c].nunique().max() > 1]
+    metric_cols = [c for c in df.columns if c.startswith("info_")] + [c for c in HEADLINE if c in df.columns]
 
     grouped = df.groupby(group_cols, sort=False)
     summary = grouped[metric_cols].agg(["mean", "std"])
@@ -64,15 +75,45 @@ def summarize(out_dir: str) -> pd.DataFrame:
     summary = summary.reset_index().sort_values(
         group_cols, key=lambda col: col.map(lambda v: (isinstance(v, str), v)), ignore_index=True)
     summary.to_csv(Path(out_dir) / "summary.csv", index=False)
-    return summary
+    return summary, group_cols
+
+
+def scaling_slopes(summary: pd.DataFrame, group_cols: list[str], families: list[dict], out_dir: str) -> pd.DataFrame:
+    variant_cols = [c for c in group_cols if not c.startswith("env.")]
+    rows = []
+    for family in families:
+        base = family["base"]
+        for axis, scale in family["axes"].items():
+            others = [k for k in base if k != axis and f"env.{k}" in summary.columns]
+            on_axis = summary[np.all([summary[f"env.{k}"] == base[k] for k in others], axis=0)]
+            for variant, part in on_axis.groupby(variant_cols, sort=False):
+                x = part[f"env.{axis}"].astype(float)
+                x = np.log2(1 + x) if scale == "log" else x
+                if x.nunique() < 2:
+                    continue
+                row = dict(zip(variant_cols, variant), family=family["name"], axis=axis, points=len(part))
+                for metric in ("p_decisive_mean", "avg_p_decisive_mean"):
+                    row[f"{metric.removesuffix('_mean')}_slope"] = np.polyfit(x, part[metric].astype(float), 1)[0]
+                rows.append(row)
+    slopes = pd.DataFrame(rows)
+    slopes.to_csv(Path(out_dir) / "scaling.csv", index=False)
+    return slopes
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("spec", help="experiment file, e.g. experiments/key_to_door.json")
+    parser.add_argument("spec", help="experiment file, e.g. experiments/baselines.json")
     parser.add_argument("--workers", type=int, default=1, help="number of runs to train in parallel")
+    parser.add_argument("--only", default="", help="run only the runs whose name contains this text, e.g. label-oracle")
     args = parser.parse_args()
-    sweep(args.spec, args.workers)
-    out_dir = json.loads(Path(args.spec).read_text())["out_dir"]
-    print(summarize(out_dir).round(3).to_string(index=False))
-    print(f"\nSaved to {out_dir}/summary.csv")
+    spec = json.loads(Path(args.spec).read_text())
+
+    sweep(spec, args.workers, args.only)
+    summary, group_cols = summarize(spec["out_dir"])
+    shown = group_cols + ["seeds"] + [c for c in summary.columns if c.endswith("_mean")]
+    print(summary[shown].rename(columns=lambda c: c.removesuffix("_mean")).round(3).to_string(index=False))
+    print(f"\nSaved to {spec['out_dir']}/summary.csv")
+    if "scaling" in spec:
+        slopes = scaling_slopes(summary, group_cols, spec["scaling"], spec["out_dir"])
+        print("\nScaling slopes (change in the probability of the decisive action per unit of each axis)")
+        print(slopes.round(3).to_string(index=False))
