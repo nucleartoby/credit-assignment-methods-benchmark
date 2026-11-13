@@ -67,6 +67,7 @@ def summarize(out_dir: str) -> tuple[pd.DataFrame, list[str]]:
     df[settings] = df[settings].astype(object).where(df[settings].notna(), "default")
     group_cols = [variant] + [c for c in settings if df.groupby(variant)[c].nunique().max() > 1]
     metric_cols = [c for c in df.columns if c.startswith("info_")] + [c for c in HEADLINE if c in df.columns]
+    metric_cols += [c for c in df.columns if c.startswith("learn_")]
 
     grouped = df.groupby(group_cols, sort=False)
     summary = grouped[metric_cols].agg(["mean", "std"])
@@ -105,12 +106,14 @@ if __name__ == "__main__":
     parser.add_argument("spec", help="experiment file, e.g. experiments/baselines.json")
     parser.add_argument("--workers", type=int, default=1, help="number of runs to train in parallel")
     parser.add_argument("--only", default="", help="run only the runs whose name contains this text, e.g. label-oracle")
+    parser.add_argument("--out-dir", help="write the runs here instead of the experiment file's out_dir")
     args = parser.parse_args()
     spec = json.loads(Path(args.spec).read_text())
+    spec["out_dir"] = args.out_dir or spec["out_dir"]
 
     sweep(spec, args.workers, args.only)
     summary, group_cols = summarize(spec["out_dir"])
-    shown = group_cols + ["seeds"] + [c for c in summary.columns if c.endswith("_mean")]
+    shown = group_cols + ["seeds"] + [c for c in summary.columns if c.endswith("_mean") and not c.startswith("learn_")]
     print(summary[shown].rename(columns=lambda c: c.removesuffix("_mean")).round(3).to_string(index=False))
     print(f"\nSaved to {spec['out_dir']}/summary.csv")
     if "scaling" in spec:
