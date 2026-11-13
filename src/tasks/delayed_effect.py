@@ -42,6 +42,10 @@ class DelayedEffect:
         states = np.arange(2 * (self.depth + 1))
         return states if self.observe_flag else states - states % 2
 
+    def roles(self) -> np.ndarray:
+        t = np.repeat(np.arange(self.depth + 1), 2)
+        return np.where((t == 0) & self.decisive, 0, np.where(self.paying[t], 1, 2))
+
     def reset(self) -> np.ndarray:
         self.t[:] = 0
         self.flag[:] = False
