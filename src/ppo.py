@@ -15,7 +15,7 @@ import torch.nn as nn
 from .agent import ActorCritic
 from .methods import METHODS, Rollout
 from .methods.gae import compute_gae
-from .metrics import credit_metrics, run_summary
+from .metrics import credit_metrics, failure_metrics, run_summary
 from .tasks import make_vec
 
 
@@ -174,8 +174,10 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
         returns = compute_gae(rollout.rewards, rollout.values, rollout.next_values, rollout.terminated, rollout.dones,
                               cfg.gamma, cfg.critic_lambda)[1]
         if has_oracle:
-            groups = vec.observation_ids()[data["states"].cpu().numpy()]
-            task_metrics.update(credit_metrics(raw_credit.cpu().numpy(), oracle_credit.cpu().numpy(), groups))
+            states = data["states"].cpu().numpy()
+            scored = raw_credit.cpu().numpy(), oracle_credit.cpu().numpy(), vec.observation_ids()[states]
+            task_metrics.update(credit_metrics(*scored))
+            task_metrics.update(failure_metrics(*scored, vec.roles()[states]))
 
         batch_size = len(credit)
         if cfg.minibatch_size:
@@ -240,7 +242,7 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
             metrics_file.flush()
         if cfg.log_interval and (update % cfg.log_interval == 0 or progress() >= 1.0):
             shown = {k.removeprefix("info_"): v for k, v in metrics.items()
-                     if k.startswith("info_") or k in ("p_decisive", "credit_corr", "spurious_frac")}
+                     if k.startswith("info_") or k in ("p_decisive", "credit_corr", "spurious_frac", "decision_corr")}
             print(
                 f"update {update:>4}  step {global_step:>8}  episodes {num_episodes:>7}  "
                 f"return {metrics['mean_return']:>8.2f}" + "".join(f"  {k} {v:.2f}" for k, v in shown.items())
