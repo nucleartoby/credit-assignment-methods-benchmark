@@ -101,6 +101,40 @@ def scaling_slopes(summary: pd.DataFrame, group_cols: list[str], families: list[
     return slopes
 
 
+def limits(summary: pd.DataFrame, group_cols: list[str], spec: dict, out_dir: str) -> pd.DataFrame:
+    variant_cols = [c for c in group_cols if not c.startswith("env.")]
+    tasks = spec["grid"]["env_kwargs"]
+    rows = []
+    for ladder in spec["ladders"]:
+        levels = [tasks[i] for i in ladder["levels"]]
+        knobs = [k for k in levels[0] if len({json.dumps(level[k]) for level in levels}) > 1]
+        for variant, part in summary.groupby(variant_cols, sort=False):
+            climbing = True
+            for rung, level in enumerate(levels):
+                runs = part
+                for k, v in level.items():
+                    if f"env.{k}" in runs:
+                        runs = runs[runs[f"env.{k}"] == v]
+                score = float(runs[f"{ladder['score']}_mean"].mean()) if len(runs) else float("nan")
+                climbing = climbing and bool(score <= ladder["pass"] if ladder.get("lower") else score >= ladder["pass"])
+                rows.append({**dict(zip(variant_cols, variant)), "ladder": ladder["name"], "rung": rung,
+                             "level": ", ".join(f"{k}={level[k]}" for k in knobs), "score": score, "within_limit": climbing})
+    table = pd.DataFrame(rows)
+    table.to_csv(Path(out_dir) / "limits.csv", index=False)
+    return table
+
+
+def show_limits(table: pd.DataFrame, spec: dict) -> None:
+    variant_cols = [c for c in table.columns if c not in ("ladder", "rung", "level", "score", "within_limit")]
+    for ladder in spec["ladders"]:
+        part = table[table["ladder"] == ladder["name"]]
+        wide = part.pivot(index=variant_cols, columns="level", values="score")[list(part["level"].unique())].round(3)
+        last = part[part["within_limit"]].groupby(variant_cols, sort=False)["level"].last()
+        wide["limit"] = last.reindex(wide.index).fillna("none")
+        print(f"\nLadder: {ladder['name']} ({ladder['score']} must be at {'most' if ladder.get('lower') else 'least'} {ladder['pass']})")
+        print(wide.to_string())
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("spec", help="experiment file, e.g. experiments/baselines.json")
@@ -120,3 +154,5 @@ if __name__ == "__main__":
         slopes = scaling_slopes(summary, group_cols, spec["scaling"], spec["out_dir"])
         print("\nScaling slopes (change in the probability of the decisive action per unit of each axis)")
         print(slopes.round(3).to_string(index=False))
+    if "ladders" in spec:
+        show_limits(limits(summary, group_cols, spec, spec["out_dir"]), spec)
