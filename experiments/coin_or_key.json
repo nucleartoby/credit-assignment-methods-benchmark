@@ -1,0 +1,24 @@
+{"out_dir": "runs/coin_or_key",
+  "base": {
+    "env_id": "CoinOrKey-v0",
+    "gamma": 1.0,
+    "total_timesteps": 1000000},
+  "grid": {
+    "variant": [
+      {"label": "gae_0", "method": "gae", "gae_lambda": 0.0},
+      {"label": "gae_0.95", "method": "gae", "gae_lambda": 0.95},
+      {"label": "gae_1", "method": "gae", "gae_lambda": 1.0},
+      {"label": "mc", "method": "mc"}],
+    "env_kwargs": [
+      {"coin_reward": 0.0, "distractor_steps": 30},
+      {"coin_reward": 2.5, "distractor_steps": 30},
+      {"coin_reward": 5.0, "distractor_steps": 30},
+      {"coin_reward": 7.5, "distractor_steps": 30},
+      {"coin_reward": 9.0, "distractor_steps": 30},
+      {"coin_reward": 5.0, "distractor_steps": 0},
+      {"coin_reward": 5.0, "distractor_steps": 100},
+      {"coin_reward": 5.0, "distractor_steps": 300}],
+    "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]},
+  "ladders": [
+    {"name": "coin value", "score": "has_key", "pass": 0.8, "levels": [0, 1, 2, 3, 4]},
+    {"name": "delay", "score": "has_key", "pass": 0.8, "levels": [5, 2, 6, 7]}]}
