@@ -1,0 +1,21 @@
+{"out_dir": "runs/many_keys",
+  "base": {
+    "env_id": "ManyKeys-v0",
+    "gamma": 1.0,
+    "total_timesteps": 1000000},
+  "grid": {
+    "variant": [
+      {"label": "gae_0", "method": "gae", "gae_lambda": 0.0},
+      {"label": "gae_0.95", "method": "gae", "gae_lambda": 0.95},
+      {"label": "gae_1", "method": "gae", "gae_lambda": 1.0},
+      {"label": "mc", "method": "mc"}],
+    "env_kwargs": [
+      {"num_keys": 1, "need_all": false},
+      {"num_keys": 2, "need_all": false},
+      {"num_keys": 4, "need_all": false},
+      {"num_keys": 8, "need_all": false},
+      {"num_keys": 2, "need_all": true}],
+    "seed": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]},
+  "ladders": [
+    {"name": "number of keys", "score": "keys_held", "pass": 0.8, "levels": [0, 1, 2, 3]},
+    {"name": "all keys needed", "score": "keys_held", "pass": 0.8, "levels": [0, 4]}]}
