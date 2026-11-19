@@ -46,4 +46,5 @@
     {"name": "flag visible", "base": {"depth": 30, "num_actions": 2, "density": 0.0, "reward_noise": 0.0, "observe_flag": true, "decisive": true},
      "axes": {"depth": "log", "density": "linear", "num_actions": "log", "reward_noise": "linear"}},
     {"name": "flag hidden", "base": {"depth": 30, "num_actions": 2, "density": 0.0, "reward_noise": 0.0, "observe_flag": false, "decisive": true},
-     "axes": {"depth": "log"}}]}
+     "axes": {"depth": "log"}}],
+  "settings": {"offline_episodes": [128, 1280, 10000], "headline_episodes": 1280, "drift_episodes": 2560, "p_end": 0.95}}
