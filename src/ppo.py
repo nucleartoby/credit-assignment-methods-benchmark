@@ -57,6 +57,18 @@ def _jsonable(metrics: dict) -> dict:
     return {k: None if isinstance(v, float) and not math.isfinite(v) else v for k, v in metrics.items()}
 
 
+def value_loss(new_value: torch.Tensor, old_value: torch.Tensor, returns: torch.Tensor, cfg: PPOConfig) -> torch.Tensor:
+    unclipped = (new_value - returns) ** 2
+    if not cfg.clip_vloss:
+        return 0.5 * unclipped.mean()
+    clipped = old_value + (new_value - old_value).clamp(-cfg.clip_coef, cfg.clip_coef)
+    return 0.5 * torch.max(unclipped, (clipped - returns) ** 2).mean()
+
+
+def minibatch_count(batch_size: int, cfg: PPOConfig) -> int:
+    return max(1, round(batch_size / cfg.minibatch_size)) if cfg.minibatch_size else cfg.num_minibatches
+
+
 def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
     if cfg.method not in METHODS:
         raise ValueError(f"Unknown method {cfg.method!r}; available: {sorted(METHODS)}")
@@ -180,10 +192,7 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
             task_metrics.update(failure_metrics(*scored, vec.roles()[states]))
 
         batch_size = len(credit)
-        if cfg.minibatch_size:
-            num_minibatches = max(1, round(batch_size / cfg.minibatch_size))
-        else:
-            num_minibatches = cfg.num_minibatches
+        num_minibatches = minibatch_count(batch_size, cfg)
         clip_fracs = []
         for _ in range(cfg.update_epochs):
             for mb in torch.randperm(batch_size, device=device).tensor_split(num_minibatches):
@@ -199,13 +208,7 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
                     credit[mb] * ratio,
                     credit[mb] * ratio.clamp(1 - cfg.clip_coef, 1 + cfg.clip_coef),).mean()
 
-                v_loss_unclipped = (new_value - returns[mb]) ** 2
-                if cfg.clip_vloss:
-                    v_clipped = rollout.values[mb] + (new_value - rollout.values[mb]).clamp(-cfg.clip_coef, cfg.clip_coef)
-                    v_loss = 0.5 * torch.max(v_loss_unclipped, (v_clipped - returns[mb]) ** 2).mean()
-                else:
-                    v_loss = 0.5 * v_loss_unclipped.mean()
-
+                v_loss = value_loss(new_value, rollout.values[mb], returns[mb], cfg)
                 entropy_loss = entropy.mean()
                 loss = pg_loss - cfg.ent_coef * entropy_loss + cfg.vf_coef * v_loss
 
