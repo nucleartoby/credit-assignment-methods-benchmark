@@ -51,7 +51,7 @@ def sweep(spec: dict, workers: int, only: str = "") -> None:
             print(f"[{n}/{len(jobs)}] {future.result()}", flush=True)
 
 
-def summarize(out_dir: str) -> tuple[pd.DataFrame, list[str]]:
+def load_runs(out_dir: str) -> tuple[pd.DataFrame, set[str]]:
     rows, config_cols = [], set()
     for final in sorted(Path(out_dir).glob("*/final.json")):
         config = json.loads((final.parent / "config.json").read_text())
@@ -60,7 +60,11 @@ def summarize(out_dir: str) -> tuple[pd.DataFrame, list[str]]:
         rows.append({**json.loads(final.read_text()), **config})
     if not rows:
         raise SystemExit(f"No finished runs in {out_dir}")
-    df = pd.DataFrame(rows)
+    return pd.DataFrame(rows), config_cols
+
+
+def summarise(out_dir: str) -> tuple[pd.DataFrame, list[str]]:
+    df, config_cols = load_runs(out_dir)
 
     variant = "label" if df["label"].astype(bool).all() else "method"
     settings = [c for c in df.columns if c in config_cols and c not in (variant, "seed", "run_name")]
@@ -146,7 +150,7 @@ if __name__ == "__main__":
     spec["out_dir"] = args.out_dir or spec["out_dir"]
 
     sweep(spec, args.workers, args.only)
-    summary, group_cols = summarize(spec["out_dir"])
+    summary, group_cols = summarise(spec["out_dir"])
     shown = group_cols + ["seeds"] + [c for c in summary.columns if c.endswith("_mean") and not c.startswith("learn_")]
     print(summary[shown].rename(columns=lambda c: c.removesuffix("_mean")).round(3).to_string(index=False))
     print(f"\nSaved to {spec['out_dir']}/summary.csv")
