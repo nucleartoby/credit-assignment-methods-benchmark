@@ -45,8 +45,7 @@ def critic_values(task: DelayedEffect, probs: np.ndarray, critic: str, seed: int
     return values
 
 
-def sample(task: DelayedEffect, probs: np.ndarray, values: np.ndarray, seed: int = 0) -> tuple[Rollout, np.ndarray]:
-    rng = np.random.default_rng([seed, 1])
+def collect(task: DelayedEffect, probs: np.ndarray, rng: np.random.Generator) -> list[np.ndarray]:
     n = task.num_envs
     ids = np.arange(n)
     task.reset()
@@ -56,17 +55,24 @@ def sample(task: DelayedEffect, probs: np.ndarray, values: np.ndarray, seed: int
         actions = np.minimum((rng.random((n, 1)) > probs[states].cumsum(axis=1)).sum(axis=1), task.num_actions - 1)
         rewards, terminated = task.step(ids, actions)[1:3]
         steps.append((states, actions, rewards, terminated))
-    states, actions, rewards, terminated = (np.stack(x, axis=1).reshape(-1) for x in zip(*steps))
+    return [np.stack(x, axis=1).reshape(-1) for x in zip(*steps)]
 
+
+def to_rollout(probs: np.ndarray, truth: np.ndarray, values, states, actions, rewards, terminated, obs=None) -> Rollout:
     def f(x):
         return torch.as_tensor(x, dtype=torch.float32)
 
-    v = f(values[states])
+    v = f(values)[states]
     dones = f(terminated)
-    rollout = Rollout(obs=torch.zeros(len(states), 0), actions=torch.as_tensor(actions), logprobs=f(np.log(probs[states, actions])),
-                      rewards=f(rewards), values=v, next_values=torch.where(dones.bool(), torch.zeros_like(v), torch.roll(v, -1)),
-                      terminated=dones, dones=dones, oracle_credit=f(task.oracle(probs)[0][states, actions]))
-    return rollout, states
+    return Rollout(obs=torch.zeros(len(states), 0) if obs is None else obs[states], actions=torch.as_tensor(actions),
+                   logprobs=f(np.log(probs[states, actions])), rewards=f(rewards), values=v,
+                   next_values=torch.where(dones.bool(), torch.zeros_like(v), torch.roll(v, -1)), terminated=dones, dones=dones,
+                   oracle_credit=f(truth[states, actions]))
+
+
+def sample(task: DelayedEffect, probs: np.ndarray, values: np.ndarray, seed: int = 0) -> tuple[Rollout, np.ndarray]:
+    batch = collect(task, probs, np.random.default_rng([seed, 1]))
+    return to_rollout(probs, task.oracle(probs)[0], values, *batch), batch[0]
 
 
 def bias_report(credit, truth, states, actions, num_actions: int, min_count: int = 100, z_max: float = 5.0,
