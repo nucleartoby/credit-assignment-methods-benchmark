@@ -12,14 +12,15 @@ from .sweep import _slug, load_runs, sweep
 WINDOW = 10
 METRICS = ("credit_corr", "credit_slope", "spurious_frac", "spurious_rms", "decision_corr", "decision_retention", "decision_noise",
            "decision_signal", "distractor_corr", "distractor_retention", "share_offset", "share_neutral", "share_decision_noise",
-           "share_distractor_noise", "value_error")
+           "share_distractor_noise", "value_error", "q_ranking", "q_gap_ratio", "q_rmse")
 CONTROL = {"avg_credit_corr": "credit_corr", "avg_credit_slope": "credit_slope", "avg_spurious_frac": "spurious_frac",
            "avg_spurious_rms": "spurious_rms", "learn_decision_corr": "decision_corr", "learn_decision_retention": "decision_retention",
            "learn_decision_noise": "decision_noise", "learn_decision_signal": "decision_signal", "learn_distractor_corr": "distractor_corr",
            "learn_distractor_retention": "distractor_retention", "learn_share_offset": "share_offset", "learn_share_neutral": "share_neutral",
-           "learn_share_decision_noise": "share_decision_noise", "learn_share_distractor_noise": "share_distractor_noise"}
+           "learn_share_decision_noise": "share_decision_noise", "learn_share_distractor_noise": "share_distractor_noise",
+           "avg_q_ranking": "q_ranking", "avg_q_gap_ratio": "q_gap_ratio", "avg_q_rmse": "q_rmse"}
 PERFORMANCE = ("avg_p_decisive", "p_decisive", "solved_at", "solved")
-CURVES = ("credit_corr", "decision_corr", "spurious_rms", "p_decisive", "value_error")
+CURVES = ("credit_corr", "decision_corr", "spurious_rms", "p_decisive", "value_error", "q_ranking")
 KEYS = ["setting", "condition", "task", "group", "label"]
 LOWER_IS_BETTER = ("spurious",)
 NO_DECISIVE = "no decisive action"
@@ -28,8 +29,11 @@ NO_DECISIVE = "no decisive action"
 def tests(headline_episodes: int) -> dict:
     offline_head = f"{headline_episodes} episodes"
     return {"offline_accuracy": ("offline", offline_head, "credit_corr"), "offline_signal": ("offline", offline_head, "decision_corr"),
+            "offline_q_ranking": ("offline", offline_head, "q_ranking"),
             "stationary_accuracy": ("stationary", "final", "credit_corr"), "stationary_signal": ("stationary", "final", "decision_corr"),
+            "stationary_q_ranking": ("stationary", "final", "q_ranking"),
             "changing_accuracy": ("drift", "moving", "credit_corr"), "changing_signal": ("drift", "moving", "decision_corr"),
+            "changing_q_ranking": ("drift", "moving", "q_ranking"),
             "learning": ("control", "learning", "avg_p_decisive"), "spurious": ("stationary", "final", "spurious_rms")}
 
 
@@ -155,7 +159,7 @@ def build(spec: dict, out: Path) -> dict[str, pd.DataFrame]:
 def show(tables: dict[str, pd.DataFrame], spec: dict) -> None:
     tasks = tables["tasks"]
     decisive = tasks[tasks["group"] != NO_DECISIVE]
-    for metric in ("credit_corr", "decision_corr"):
+    for metric in ("credit_corr", "decision_corr", "q_ranking"):
         wide = decisive.pivot_table(index="label", columns=["setting", "condition"], values=f"{metric}_mean", aggfunc="mean", sort=False)
         print(f"\n{metric} in each setting, mean over the tasks with a decisive action")
         print(wide.reindex(labels(spec)).round(3).to_string())
