@@ -15,7 +15,7 @@ import torch.nn as nn
 from .agent import ActorCritic
 from .methods import METHODS, Rollout
 from .methods.gae import compute_gae
-from .metrics import credit_metrics, failure_metrics, run_summary
+from .metrics import credit_metrics, failure_metrics, q_metrics, run_summary
 from .tasks import make_vec
 
 
@@ -171,7 +171,7 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
         if has_oracle:
             with torch.no_grad():
                 probs = torch.softmax(agent.actor(to_tensor(vec.all_observations())), dim=-1).cpu().numpy()
-            true_credit, true_values = vec.oracle(probs)
+            true_credit, true_values, true_q = vec.oracle(probs)
             oracle_credit = to_tensor(true_credit)[data["states"], data["actions"]]
             task_metrics = vec.task_metrics(probs, true_values)
 
@@ -190,6 +190,10 @@ def train(cfg: PPOConfig) -> tuple[ActorCritic, list[dict]]:
             scored = raw_credit.cpu().numpy(), oracle_credit.cpu().numpy(), vec.observation_ids()[states]
             task_metrics.update(credit_metrics(*scored))
             task_metrics.update(failure_metrics(*scored, vec.roles()[states]))
+            with torch.no_grad():
+                state_vals = agent.get_value(to_tensor(vec.all_observations())).cpu().numpy().astype(np.float64)
+            task_metrics.update(q_metrics(scored[0], state_vals, true_q, states, data["actions"].cpu().numpy(),
+                                         vec.roles()[states], vec.action_space.n))
 
         batch_size = len(credit)
         num_minibatches = minibatch_count(batch_size, cfg)
