@@ -1,6 +1,6 @@
 import numpy as np
 
-CURVES = ("p_decisive", "expected_return", "credit_corr", "credit_slope", "spurious_frac", "spurious_rms")
+CURVES = ("p_decisive", "expected_return", "credit_corr", "credit_slope", "spurious_frac", "spurious_rms", "q_ranking")
 ROLES = ("decision", "distractor", "neutral")
 WASTE = ("share_offset", "share_neutral", "share_decision_noise", "share_distractor_noise")
 FAILURES = tuple(f"{role}_{stat}" for role in ROLES[:2] for stat in ("corr", "retention", "noise", "signal")) + WASTE
@@ -55,6 +55,49 @@ def failure_metrics(credit, truth, groups, roles) -> dict:
             out[f"{name}_corr"] = slope * np.sqrt(truth_ss / total)
             out[f"share_{name}_noise"] = (residual**2).sum() / total
     return {k: float(v) for k, v in out.items()}
+
+
+Q_METRICS = ("q_ranking", "q_gap_ratio", "q_rmse")
+
+
+def q_metrics(credit, state_values, q_oracle, states, actions, roles, num_actions: int) -> dict:
+    credit = np.asarray(credit, dtype=np.float64)
+    state_values = np.asarray(state_values, dtype=np.float64)
+    q_oracle = np.asarray(q_oracle, dtype=np.float64)
+
+    v_per_step = state_values[states]
+    q_hat_sa = credit + v_per_step
+    q_oracle_sa = q_oracle[states, actions]
+    out = {"q_rmse": float(np.sqrt(((q_hat_sa - q_oracle_sa) ** 2).mean()))}
+
+    decision = roles == 0
+    if not decision.any():
+        out["q_ranking"] = float("nan")
+        out["q_gap_ratio"] = float("nan")
+        return out
+
+    num_states = q_oracle.shape[0]
+    q_hat = np.zeros((num_states, num_actions))
+    counts = np.zeros((num_states, num_actions))
+    np.add.at(q_hat, (states, actions), q_hat_sa)
+    np.add.at(counts, (states, actions), 1)
+    observed = counts > 0
+    q_hat[observed] /= counts[observed]
+    q_hat[~observed] = state_values[np.where(~observed)[0]]
+
+    dec_states = np.unique(states[decision])
+    q_oracle_dec = q_oracle[dec_states]
+    q_hat_dec = q_hat[dec_states]
+    out["q_ranking"] = float((q_hat_dec.argmax(axis=1) == q_oracle_dec.argmax(axis=1)).mean())
+
+    oracle_gap = q_oracle_dec[:, 0] - q_oracle_dec[:, 1:].max(axis=1)
+    hat_gap = q_hat_dec[:, 0] - q_hat_dec[:, 1:].max(axis=1)
+    safe = np.abs(oracle_gap) > 1e-8
+    if safe.any():
+        out["q_gap_ratio"] = float((hat_gap[safe] / oracle_gap[safe]).mean())
+    else:
+        out["q_gap_ratio"] = float("nan")
+    return out
 
 
 def run_summary(history: list[dict], solved: float = 0.9) -> dict:
