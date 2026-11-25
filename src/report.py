@@ -17,11 +17,13 @@ CONDITIONS = [("offline", "128 episodes", "128 ep"), ("offline", "1280 episodes"
               ("drift", "held", "policy\nheld"), ("control", "learning", "PPO\nrun")]
 SETTINGS = [("Offline", 3), ("Stationary", 2), ("Drift", 2), ("Learn", 1)]
 PANELS = [("decision_corr", "Signal (decision_corr)", "viridis", False), ("credit_corr", "Accuracy (credit_corr)", "viridis", False),
+          ("q_ranking", "Q-value ranking (q_ranking)", "viridis", False),
           ("spurious_rms", "Spurious credit (spurious_rms, lower is better)", "magma_r", True)]
 LEARNING = [("avg_p_decisive", "avg\np_decisive", (0, 1)), ("p_decisive", "final\np_decisive", (0, 1)), ("solved", "seeds\nsolved", (0, 1)),
             ("solved_at", "solved at\n(episodes)", (10000, 0))]
 NAMES = {"gae_0": "GAE, λ = 0", "gae_0.95": "GAE, λ = 0.95", "gae_1": "GAE, λ = 1", "mc": "Monte Carlo return", "oracle": "Oracle (true credit)"}
-TESTS = ["offline_accuracy", "offline_signal", "stationary_accuracy", "stationary_signal", "changing_accuracy", "changing_signal", "learning", "spurious"]
+TESTS = ["offline_accuracy", "offline_signal", "offline_q_ranking", "stationary_accuracy", "stationary_signal", "stationary_q_ranking",
+         "changing_accuracy", "changing_signal", "changing_q_ranking", "learning", "spurious"]
 
 # dashboard stuff
 
@@ -59,7 +61,7 @@ def core_section(fig, grid, tasks: pd.DataFrame, label: str) -> None:
     names = list(dict.fromkeys(tasks["task"]))
     groups = tasks.drop_duplicates("task").set_index("task")["group"]
     cell = {(r.setting, r.condition, r.task): r for r in mine.itertuples()}
-    sub = grid.subgridspec(1, 5, width_ratios=[1.35, 3, 3, 3, 1.9], wspace=0.06)
+    sub = grid.subgridspec(1, 6, width_ratios=[1.35, 3, 3, 3, 3, 1.9], wspace=0.06)
     ax = fig.add_subplot(sub[0])
     ax.axis("off")
     ax.set_ylim(len(names) - 0.5, -0.5)
@@ -82,7 +84,7 @@ def core_section(fig, grid, tasks: pd.DataFrame, label: str) -> None:
     values = np.array([[np.nan if groups[t] == NO_DECISIVE else getattr(cell.get(("control", "learning", t)), f"{m}_mean", np.nan)
                         for m, _, _ in LEARNING] for t in names], float)
     colors = np.column_stack([(values[:, j] - lo) / (hi - lo) for j, (_, _, (lo, hi)) in enumerate(LEARNING)])
-    a = fig.add_subplot(sub[4])
+    a = fig.add_subplot(sub[len(PANELS) + 1])
     heatmap(a, values, colors, "viridis", lambda v: f"{v:,.0f}" if v > 1.5 else f"{v:.2f}")
     a.set_xticks(range(len(LEARNING)), [l for _, l, _ in LEARNING], fontsize=7)
     a.xaxis.tick_top()
@@ -144,7 +146,7 @@ def report(label: str, core: dict, tasks: pd.DataFrame, comparison: pd.DataFrame
     slots = [len(spec["grid"]["env_kwargs"]) if not game_runs(spec, label).empty else 0 for spec in games]
     pairs = [list(zip(games, slots))[i:i + 2] for i in range(0, len(games), 2)]
     heights = [1.5, 8.6] + [max(n for _, n in pair) * 0.24 + 0.75 for pair in pairs]
-    fig = plt.figure(figsize=(22, sum(heights) * 1.12))
+    fig = plt.figure(figsize=(28, sum(heights) * 1.12))
     grid = fig.add_gridspec(len(heights), 1, height_ratios=heights, hspace=0.12 * 10 / sum(heights) * 2)
     head = fig.add_subplot(grid[0])
     head.axis("off")
