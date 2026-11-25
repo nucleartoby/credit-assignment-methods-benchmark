@@ -87,7 +87,7 @@ class DelayedEffect:
                 if self.paying[t]:
                     q[s, 1] += self.distractor_reward
                 v[s] = probs[s] @ q[s]
-        return q - v[:, None], v
+        return q - v[:, None], v, q
 
     def task_metrics(self, probs: np.ndarray, values: np.ndarray) -> dict:
         return {"p_decisive": float(probs[0, 0]), "expected_return": float(values[0])}
