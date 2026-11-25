@@ -5,7 +5,7 @@ import torch.nn as nn
 from .agent import ActorCritic
 from .methods import METHODS
 from .methods.gae import compute_gae
-from .metrics import credit_metrics, failure_metrics
+from .metrics import credit_metrics, failure_metrics, q_metrics
 from .ppo import PPOConfig, minibatch_count, value_loss
 from .tasks import DelayedEffect
 from .verify import collect, to_rollout
@@ -71,7 +71,7 @@ def online(task_kwargs: dict, variants: list[dict], base: dict, seed: int, drift
         update += 1
         moved = min(1.0, episodes / drift_episodes)
         probs = path_policy(task, moved, p_end)
-        truth, true_values = task.oracle(probs)
+        truth, true_values, true_q = task.oracle(probs)
         with torch.no_grad():
             values = agent.get_value(obs)
         batch = collect(task, probs, rng)
@@ -80,7 +80,10 @@ def online(task_kwargs: dict, variants: list[dict], base: dict, seed: int, drift
         step = {"update": update, "episodes": episodes + per, "moved": moved, "p_decisive": float(probs[0, 0]),
                 "value_error": value_error(values, true_values, states)}
         target, g, r = truth[states, batch[1]], groups[states], roles[states]
-        rows += [{"label": label, **step, **scores(credit, target, g, r)} for label, credit in credits(rollout, configs).items()]
+        vals_np = values.numpy().astype(np.float64)
+        rows += [{"label": label, **step, **scores(credit, target, g, r),
+                  **q_metrics(credit, vals_np, true_q, states, batch[1], r, task.num_actions)}
+                 for label, credit in credits(rollout, configs).items()]
         fit(agent, optimizer, rollout, obs, states, cfg, episodes)
         episodes += per
     return rows
@@ -97,7 +100,7 @@ def offline(task_kwargs: dict, variants: list[dict], base: dict, seed: int, size
         task = DelayedEffect(size, seed=seed, **task_kwargs)
         length = task.depth + 1
         probs = path_policy(task, 0.0, p_end)
-        truth, true_values = task.oracle(probs)
+        truth, true_values, true_q = task.oracle(probs)
         rng = np.random.default_rng([seed, 2, size])
         data = collect(task, probs, rng)
         agent, optimizer = new_critic(task, cfg, seed)
@@ -115,5 +118,8 @@ def offline(task_kwargs: dict, variants: list[dict], base: dict, seed: int, size
         states = data[0]
         step = {"episodes": size, "p_decisive": float(probs[0, 0]), "value_error": value_error(values, true_values, states)}
         target, g, r = truth[states, data[1]], task.observation_ids()[states], task.roles()[states]
-        rows += [{"label": label, **step, **scores(np.concatenate([c[label] for c in chunks]), target, g, r)} for label in chunks[0]]
+        vals_np = values.numpy().astype(np.float64)
+        rows += [{"label": label, **step, **scores(np.concatenate([c[label] for c in chunks]), target, g, r),
+                  **q_metrics(np.concatenate([c[label] for c in chunks]), vals_np, true_q, states, data[1], r, task.num_actions)}
+                 for label in chunks[0]]
     return rows
